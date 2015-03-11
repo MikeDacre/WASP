@@ -21,17 +21,23 @@ The remove_duplicates function requires that the
 from random import choice
 import pysam, sys, os
 
-def remove_duplicates(infile, outfile):
+def remove_duplicates(infile, outfile, logfile):
     """ Randomly pick one duplicate only from a sorted, indexed
         sam/bam file.
         infile: a pysam.Samfile open file handle
         outfile: a pysam.Samfile open file handle """
+    log = open(logfile, 'w')
+
+    total_count = 0
+    duplicates  = 0
 
     chr=""
     pos=0
     linelistplus=[]
     linelistminus=[]
+    _log("Run started", log, False)
     for line in infile:
+        total_count += 1
         if line.rname!=chr or line.pos!=pos:
             # When we reach the end of the duplicates,
             # randomly pick one from the plus strand
@@ -48,6 +54,8 @@ def remove_duplicates(infile, outfile):
             # Reset duplicate lists
             linelistplus=[]
             linelistminus=[]
+        else:
+            duplicates += 1
 
         if(line.flag==0):
             # Add plus strand to the duplicate list
@@ -58,9 +66,30 @@ def remove_duplicates(infile, outfile):
     infile.close()
     outfile.close()
 
+    # Log statistics
+    _log("Duplicate removal completed successfully.\n\n", log, False)
+    print("Total reads:       {}".format(total_count), file=log)
+    print("Total duplicates:  {}".format(duplicates), file=log)
+    print("Duplicate rate:    {:.2%}".format(duplicates/total_count), file=log)
+    print("Final read count:  {}".format(total_count - duplicates), file=log)
+    log.close()
+
 def _printerr(err):
     """ Print a message in red to STDERR """
     print('\033[91m' + err + '\x1b[0m', file=sys.stderr)
+
+def _log(output, logfile, printerr=False):
+    """ Log to file with timestamp
+        if printerr is True, will also print to stderr """
+    import datetime
+
+    timestamp   = datetime.datetime.now().strftime("%Y%m%d %H:%M:%S")
+    output      = str(output)
+    timeput     = ' | '.join([timestamp, output])
+
+    print(timeput, file=logfile)
+    if printerr:
+        print(output, file=sys.stderr)
 
 def _get_args():
     """ Command Line Argument Parsing """
@@ -109,16 +138,12 @@ def _get_args():
         _printerr("Output file must be a .sam or .bam file")
         sys.exit(1)
 
-    return(infile, outfile)
+    # Pick logfile name
+    logfile = options.logfile if options.logfile else options.input_bam + '.log'
 
-# Main function for direct running
-def main():
-    """Run directly"""
-    # Get commandline arguments
-    infile, outfile = _get_args()
-    remove_duplicates(infile, outfile)
+    return(infile, outfile, logfile)
 
-# The end
 if __name__ == '__main__':
-    main()
+    """Run directly"""
+    remove_duplicates(*_get_args())
 
