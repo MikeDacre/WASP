@@ -1,5 +1,6 @@
-#!/bin/env python
-"""===================================================
+#!/bin/env python3
+"""
+===================================================
 rmdup removes duplicate reads from a sorted,
 indexed .sam, .sam.gz, or .bam file.
 
