@@ -73,18 +73,31 @@ def _get_args():
     parser.add_argument('input_bam', help="input BAM or SAM file - must be sorted by position and indexed")
     parser.add_argument("output_bam", help="output BAM or SAM file")
 
+    # Optional log file
+    parser.add_argument('-l', "--logfile", help="Log file name. Defaults to input file name + .log")
+
     options = parser.parse_args()
 
-    if options.input_bam.endswith(".sam") or options.input_bam.endswith("sam.gz"):
-        infile = pysam.Samfile(options.input_bam, "r")
-    elif options.input_bam.endswith(".bam"):
-        # assume binary BAM file
-        infile = pysam.Samfile(options.input_bam, "rb")
-    else:
+    # Test and open input file
+    try:
+        if options.input_bam.endswith(".sam") or options.input_bam.endswith("sam.gz"):
+            infile = pysam.Samfile(options.input_bam, "r")
+        elif options.input_bam.endswith(".bam"):
+            # assume binary BAM file
+            infile = pysam.Samfile(options.input_bam, "rb")
+        else:
+            raise ValueError("File does not end in .sam, .sam.gz, or .bam")
+    except ValueError as error:
         parser.print_help()
-        _printerr("Input file must be a .sam, .sam.gz, or .bam file")
+        _printerr("\nInput file error. Cannot open.\n")
+        print("Error message:", file=sys.stderr)
+        print(error, file=sys.stderr)
+        sys.exit(1)
+    except OSError:
+        _printerr("Input file {} not found".format(options.input_bam))
         sys.exit(1)
 
+    # Test and open output file
     if options.output_bam.endswith(".sam"):
         # output in text SAM format
         outfile = pysam.Samfile(options.output_bam, "w", template=infile)
@@ -93,7 +106,7 @@ def _get_args():
         outfile = pysam.Samfile(options.output_bam, "wb", template=infile)
     else:
         parser.print_help()
-        _printerr("Output file must be a .sam, .sam.gz, or .bam file")
+        _printerr("Output file must be a .sam or .bam file")
         sys.exit(1)
 
     return(infile, outfile)
