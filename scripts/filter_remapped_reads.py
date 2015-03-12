@@ -19,7 +19,7 @@ end_of_file=False
 
 
 # Get a list of reads that remapped correctly
-remap_read=remap_bam.next()
+remap_read=next(remap_bam)
 
 while not end_of_file:    
     chrm=remap_read.qname.strip().split(":")[1]
@@ -36,7 +36,7 @@ while not end_of_file:
         if dels==0:
             correct_maps.append(read_num)
     try:
-        remap_read=remap_bam.next()
+        remap_read=next(remap_bam)
     except:
         end_of_file=True
 
@@ -48,7 +48,7 @@ sys.stderr.write(str(len(correct_maps))+" reads remapped to the correct position
 
 # Pull out original aligned reads if all of the alternatives mapped correctly
 
-orig_read=orig_bam.next()
+orig_read=next(orig_bam)
 orig_num=int(orig_num_file.readline().strip())
 line_num=1
 
@@ -63,7 +63,7 @@ while not end_of_file and map_indx< len(correct_maps) and line_num <= correct_ma
             keep_bam.write(orig_read)
         if options.is_paired_end:
             try:
-                orig_read=orig_bam.next()
+                orig_read=next(orig_bam)
             except:
                 sys.stderr.write("File ended unexpectedly (no pair found)")
                 exit()
@@ -73,7 +73,7 @@ while not end_of_file and map_indx< len(correct_maps) and line_num <= correct_ma
         line_num+=1
         correct=0
         try:
-            orig_read=orig_bam.next()
+            orig_read=next(orig_bam)
             orig_num=int(orig_num_file.readline().strip())
         except:
             end_of_file=True

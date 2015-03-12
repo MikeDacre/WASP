@@ -1,30 +1,20 @@
-#!/bin/env python3
 """
-===============================================================================
-                            find_intersecting_snps
+================================================================================
+                         WASP - mapping functions
 
-Searched a previously mapped bam or sam file for mapped reads that overlap
-single nucleotide polymorphisms (SNPs). For every read that overlaps a SNP, its
-genotype is swapped with that of the other allele and the new fastq file is
-output to <input_name>.remap.fq.gz.
-This file can then be remapped to the genome and filter_remapped_reads can be
-used to retrieve properly mapped reads.
+       VERSION: 0.1
+ Last modified: 2015-03-12 16:42
 
-Output files:
-<input>.sort.bam        - Sorted bamfile of the original input
-<input>.keep.bam        - bamfile with reads that did not intersect SNPs and
-                          therefore can be kept without remapping
-<input>.to.remap.bam    - bamfile with original reads that need to be remapped
-<input>.to.remap.num.gz - matched lines with the input.to.remap.bam that
-                          indicate the number of variants of the original read
-                          that must be remapped
-<input>.remap.fq.gz     - fastq file containing the new variants to remap.
-                          Will be .fq1.gz and .fq2.gz if the paired end option
-                          is used
-===============================================================================
+This file contains all of the functions required for the mapping portion of the
+WASP including duplicate removal functions.
+================================================================================
 """
-import sys, pysam, gzip, pdb, argparse, array
-#from pympler import asizeof
+import pysam, gzip, sys, pdb, array
+from . import file_handling
+
+####################################
+#     Find Intersecting SNPs       #
+####################################
 
 #### Class to hold the data for a single SNP
 class SNP:
@@ -71,18 +61,39 @@ class SNP:
         self.alleles.append("")
 
 #### Class to keep track of all the information read in from the bamfile/snpfile
-class Bam_scanner:
+class bam_scanner:
     # Constructor: opens files, creates initial table
     def __init__(self,is_paired_end,max_window,file_name,keep_file_name,remap_name,remap_num_name,fastq_names,snp_dir):
         self.is_paired_end=is_paired_end
 
         ### Read in all input files and create output files
+        # Test and open input bam file
+        try:
+            if options.input_bam.endswith(".sam") or options.input_bam.endswith("sam.gz"):
+                self.bamfile = pysam.Samfile(options.input_bam, "r")
+            elif options.input_bam.endswith(".bam"):
+                # assume binary BAM file
+                self.bamfile = pysam.Samfile(options.input_bam, "rb")
+            else:
+                raise ValueError("File does not end in .sam, .sam.gz, or .bam")
+        except ValueError as error:
+            parser.print_help()
+            file_handling.printerr("\nInput file error. Cannot open.\n")
+            print("Error message:", file=sys.stderr)
+            print(error, file=sys.stderr)
+            sys.exit(1)
+        except OSError:
+            file_handling.printerr("Input file {} not found".format(options.input_bam))
+            sys.exit(1)
+
         self.snp_dir=snp_dir
-        self.bamfile=pysam.Samfile(file_name,"rb")
+
+        # Open output files
         self.keep_bam=pysam.Samfile(keep_file_name,"wb",template=self.bamfile)
         self.remap_bam=pysam.Samfile(remap_name,"wb",template=self.bamfile)
         self.remap_num_file=gzip.open(remap_num_name,"w")
         self.fastqs=[gzip.open(fqn,"w") for fqn in fastq_names]
+
         try:
             self.cur_read=next(self.bamfile)
         except:
@@ -430,59 +441,71 @@ class Bam_scanner:
             reverse=self.complement(letter)+reverse
         return reverse
 
-def main():
-    """ Run as a script """
-    parser = argparse.ArgumentParser(
-                 description=__doc__,
-                 formatter_class=argparse.RawDescriptionHelpFormatter)
+####################################
+#        Duplicate Removal         #
+####################################
 
-    # Arguments
-    parser.add_argument("-p", action='store_true', dest='is_paired_end',
-                        default=False, help="Paired end data (default is single)")
-    parser.add_argument("-m", action='store', dest='max_window', type=int,
-                        default=100000, help="Changes the maximum window to search for SNPs.  The default is 100,000 base pairs.  Reads or read pairs that span more than this distance (usually due to splice junctions) will be thrown out.  Increasing this window allows for longer junctions, but may increase run time and memory requirements.")
-    parser.add_argument("infile", help=".bam file from the initial mapping process")
-    parser.add_argument("snp_dir", help="Directory containing SNPs segregating within the sample in question. Should contain sorted files of SNPs separated by chromosome and named: chr<#>.snps.txt.gz with three columns: position RefAllele AltAllele")
+def remove_duplicates(infile, outfile, logfile=''):
+    """ Randomly pick one duplicate only from a sorted, indexed
+        sam/bam file.
+        infile:  a .sam, .sam.gz, or .bam input file (sorted/indexed)
+        outfile: a .sam or .bam output file name
+        logfile: an optional file name, will include stats. Default is
+                 <infile>.log """
+    from random import choice
 
-    options=parser.parse_args()
-    infile=options.infile
-    snp_dir=options.snp_dir
-    name_split=infile.split(".")
+    # Pick logfile name
+    logfile = logfile if logfile else '.'.join(infile.split('.')[:-1]) + '.log'
+    log = open(logfile, 'w')
 
-    if len(name_split)>1:
-        pref=".".join(name_split[:-1])
-    else:
-        pref=name_split[0]
+    # Open bam files
+    infile = file_handling.open_infile(infile)
+    outfile = file_handling.open_outfile(outfile, template=infile)
 
-    pysam.sort(infile,pref+".sort")
+    total_count = 0
+    duplicates  = 0
 
-    sort_file_name=pref+".sort.bam"
-    keep_file_name=pref+".keep.bam"
-    remap_name=pref+".to.remap.bam"
-    remap_num_name=pref+".to.remap.num.gz"
+    chr=""
+    pos=0
+    linelistplus=[]
+    linelistminus=[]
+    file_handling.log("Run started", log, False)
+    for line in infile:
+        total_count += 1
+        if line.rname!=chr or line.pos!=pos:
+            # When we reach the end of the duplicates,
+            # randomly pick one from the plus strand
+            # and one from the minus strand using choice()
+            if(len(linelistplus)>0):
+                outfile.write(choice(linelistplus))
+            if(len(linelistminus)>0):
+                outfile.write(choice(linelistminus))
 
-    if options.is_paired_end:
-        fastq_names=[pref+".remap.fq1.gz",pref+".remap.fq2.gz"]
-    else:
-        fastq_names=[pref+".remap.fq.gz"]
+            # Set chr and pos to new coordinates
+            chr=line.rname
+            pos=line.pos
 
-    bam_data=Bam_scanner(options.is_paired_end,options.max_window,sort_file_name,keep_file_name,remap_name,remap_num_name,fastq_names,snp_dir)
-    bam_data.fill_table()
-    #i=0
-    while not bam_data.end_of_file:
-        #i+=1
-        #if i>50000:
-            #sys.stderr.write(str(asizeof.asizeof(bam_data))+"\t"+str(asizeof.asizeof(bam_data.snp_table))+"\t"+str(asizeof.asizeof(bam_data.read_table))+"\t"+str(bam_data.num_reads)+"\t"+str(bam_data.num_snps)+"\n")
-            #sys.stderr.write(str(asizeof.asizeof(bam_data))+"\t"+str(bam_data.num_reads)+"\t"+str(bam_data.num_snps)+"\t"+str(len(bam_data.indel_dict))+"\n")
-            #i=0
-        if options.is_paired_end:
-            bam_data.empty_slot_paired()
+            # Reset duplicate lists
+            linelistplus=[]
+            linelistminus=[]
         else:
-            bam_data.empty_slot_single()
-        bam_data.fill_table()
+            duplicates += 1
 
-    sys.stderr.write("Finished!\n")
+        #TODO: Figure out what these flags actually are
+        if(line.flag==0):
+            # Add plus strand to the duplicate list
+            linelistplus.append(line)
+        if(line.flag==16):
+            # Add minus strand to the duplicate list
+            linelistminus.append(line)
+    infile.close()
+    outfile.close()
 
-if __name__ == '__main__':
-    """Run directly"""
-    main()
+    # Log statistics
+    file_handling.log("Duplicate removal completed successfully.\n\n", log, False)
+    print("Total reads:       {}".format(total_count), file=log)
+    print("Total duplicates:  {}".format(duplicates), file=log)
+    print("Duplicate rate:    {:.2%}".format(duplicates/total_count), file=log)
+    print("Final read count:  {}".format(total_count - duplicates), file=log)
+    log.close()
+
