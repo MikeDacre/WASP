@@ -1,3 +1,4 @@
+#!/bin/env python3
 import sys, pysam, gzip, pdb, argparse, array
 #from pympler import asizeof
 
@@ -20,8 +21,6 @@ class SNP:
 
         haplo_chars=snp_split[5:]
         haplos=array.array('B',[0])*len(haplo_chars)
-        
-        
 
     def add_allele(self,new_alleles):
         for new_allele in new_alleles:
@@ -47,12 +46,12 @@ class SNP:
                 i+=1
         self.alleles.append("")
 
-#### Class to keep track of all the information read in from the bamfile/snpfile        
+#### Class to keep track of all the information read in from the bamfile/snpfile
 class Bam_scanner:
     # Constructor: opens files, creates initial table
     def __init__(self,is_paired_end,max_window,file_name,keep_file_name,remap_name,remap_num_name,fastq_names,snp_dir):
         self.is_paired_end=is_paired_end
-        
+
         ### Read in all input files and create output files
         self.snp_dir=snp_dir
         self.bamfile=pysam.Samfile(file_name,"rb")
@@ -61,7 +60,7 @@ class Bam_scanner:
         self.remap_num_file=gzip.open(remap_num_name,"w")
         self.fastqs=[gzip.open(fqn,"w") for fqn in fastq_names]
         try:
-            self.cur_read=self.bamfile.next()
+            self.cur_read=next(self.bamfile)
         except:
             sys.stderr.write("No lines available for input")
             return()
@@ -76,25 +75,25 @@ class Bam_scanner:
         self.remap=0
         self.tot=0
         self.printstats = True
-        
+
         self.num_reads=0
-        
+
         self.pos=self.cur_read.pos
         self.chr_num=self.cur_read.tid
         self.chr_name=self.bamfile.getrname(self.cur_read.tid)
         self.max_window=max_window
-                
+
         self.num_reads=0
 
         ### Initialize the read tracking tables
         self.read_table=[[] for x in range(self.max_window)]
-        
+
         ### Initialize the SNP and indel tracking tables
         self.switch_chr()
-        
+
         ### fill all tables
         self.fill_table()
-        
+
 
     # fills the table of reads starting from the current position and extending for the next <max_window> base pairs
     def fill_table(self):
@@ -108,7 +107,7 @@ class Bam_scanner:
             self.num_reads+=1
             self.read_table[self.cur_read.pos % self.max_window].append(self.cur_read)
             try:
-                self.cur_read=self.bamfile.next()
+                self.cur_read=next(self.bamfile)
             except:
                 self.empty_table()
                 self.end_of_file=True
@@ -137,7 +136,7 @@ class Bam_scanner:
             except:
                 sys.stderr.write("SNP file for chromosome "+self.chr_name+" is not found. Skipping these reads.\n")
                 self.skip_chr()
-        
+
         self.end_of_snp_file=False
         self.get_next_snp()
 
@@ -159,7 +158,7 @@ class Bam_scanner:
             else:
                 self.add_indel()
             self.get_next_snp()
-        
+
         #sys.stderr.write(str(self.num_snps)+"\n")
 
     def add_snp(self):
@@ -168,11 +167,11 @@ class Bam_scanner:
             self.num_snps+=1
             self.snp_table[cur_pos]=self.cur_snp
         elif isinstance(self.snp_table[cur_pos],SNP):
-            self.snp_table[cur_pos].add_allele(self.cur_snp.alleles)     
-   
+            self.snp_table[cur_pos].add_allele(self.cur_snp.alleles)
+
     def add_indel(self):
         position=self.cur_snp.pos
-        if self.indel_dict.has_key(position):
+        if position in self.indel_dict:
             start=self.indel_dict[position].max_len
             self.indel_dict[position].add_allele(self.cur_snp.alleles)
         else:
@@ -197,7 +196,7 @@ class Bam_scanner:
     def skip_chr(self):
         while self.cur_read.tid == self.chr_num:
             try:
-                self.cur_read=self.bamfile.next()
+                self.cur_read=next(self.bamfile)
             except:
                 self.empty_table()
                 self.end_of_file=True
@@ -232,13 +231,13 @@ class Bam_scanner:
                     loc_line="%i:%s:%i:%i" % (self.remap_num,self.chr_name,read.pos,num_seqs-1)
                     self.fastqs[0].write("@%s\n%s\n+%s\n%s\n"%(loc_line,seq,loc_line,read.qual))
                 self.remap_num+=1
-        #if self.printstats: 
+        #if self.printstats:
         #    sys.stderr.write(str(self.tot)+" "+str(self.nosnp)+" "+str(self.remap)+" "+str(self.toss)+"\n")
         #    self.printstats = False
         #sys.stderr.write(str(self.ref_match)+" "+str(self.alt_match)+" "+str(self.no_match)+"\n")
         self.pos+=1
         self.shift_SNP_table()
-        
+
 
     # Processes all reads that map to the current position and removes them from the read table
     # Treats reads as paired-end
@@ -248,7 +247,7 @@ class Bam_scanner:
             read=self.read_table[self.pos % self.max_window].pop() #Pop the first read in the slot
             self.num_reads-=1
             pair_chr_num=read.rnext #Figure out the matching read position
-            pair_pos=read.mpos 
+            pair_pos=read.mpos
             if pair_chr_num != self.chr_num or pair_pos-self.pos > self.max_window:
                 continue
             pair_slot=pair_pos % self.max_window # Find the slot the matching read in
@@ -281,11 +280,11 @@ class Bam_scanner:
                                 first=False
                         self.remap_num+=1
                     break # stop searching for the pair since it was found
-        
+
         #sys.stderr.write(str(self.ref_match)+" "+str(self.alt_match)+" "+str(self.no_match)+" "+str(self.toss)+"\n")
         self.pos+=1
         self.shift_SNP_table()
-        
+
 
     # Checks a single aligned read for overlapping SNPs and created alternative sequences for remapping
     def check_for_snps(self,read,start_dist):
@@ -304,7 +303,7 @@ class Bam_scanner:
             if cigar[0] == 4: #if CIGAR indicates a soft-clipping
                 p=p+cigar[1]
             elif cigar[0] == 0: #if CIGAR indicates a match alignment to the reference genome
-                for i in range(cigar[1]):  
+                for i in range(cigar[1]):
                     if len(self.indel_table[indx])==0:
                         snp=self.snp_table[indx]
                         if snp!=0:
@@ -338,14 +337,14 @@ class Bam_scanner:
             else: #if there is a non-N/M in the read CIGAR, throw out the read
                 self.toss+=1
                 return([])
-                
+
         if len(seqs)==1:
             self.nosnp+=1
         else:
             self.remap+=1
         return seqs
     # Shifts the SNP table over one position and makes sure that indels are not lost
-    def shift_SNP_table(self):             
+    def shift_SNP_table(self):
         ### Current slot to fill is the position + max_window - 1
         cur_slot=(self.pos-1)%self.max_window
 
@@ -354,7 +353,7 @@ class Bam_scanner:
             #sys.stderr.write(str(indel_pos+self.indel_dict[indel_pos].max_len-1)+"\t"+str(self.pos-1)+"\t"+str(self.indel_dict[indel_pos].max_len)+"\n")
             if indel_pos+self.indel_dict[indel_pos].max_len-1==self.pos-1:
                 del self.indel_dict[indel_pos]
-        
+
         self.indel_table[cur_slot]=[]
         ### Carry over indels from the previous slot
         for indel_pos in self.indel_table[cur_slot-1]:
@@ -380,7 +379,7 @@ class Bam_scanner:
                     self.indel_table[cur_slot].append(cur_snp.pos)
             self.get_next_snp()
 
-    # Completely empties the read_table by repeatedly calling empty_slot function 
+    # Completely empties the read_table by repeatedly calling empty_slot function
     def empty_table(self):
         end_pos=self.pos+self.max_window
         while self.pos < end_pos:
@@ -413,12 +412,12 @@ def main():
     parser.add_argument("-m", action='store', dest='max_window', type=int, default=100000)
     parser.add_argument("infile", action='store')
     parser.add_argument("snp_dir", action='store')
-    
+
     options=parser.parse_args()
     infile=options.infile
     snp_dir=options.snp_dir
     name_split=infile.split(".")
-    
+
     if len(name_split)>1:
         pref=".".join(name_split[:-1])
     else:
@@ -450,8 +449,10 @@ def main():
         else:
             bam_data.empty_slot_single()
         bam_data.fill_table()
-    
+
     sys.stderr.write("Finished!\n")
 
-main()
+if __name__ == '__main__':
+    """Run directly"""
+    main()
 
