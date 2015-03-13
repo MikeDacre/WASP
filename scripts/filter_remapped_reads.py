@@ -17,11 +17,10 @@ orig_num_file=gzip.open(options.orig_num_file)
 correct_maps=[]
 end_of_file=False
 
-
 # Get a list of reads that remapped correctly
 remap_read=next(remap_bam)
 
-while not end_of_file:    
+while not end_of_file:
     chrm=remap_read.qname.strip().split(":")[1]
     if remap_read.is_reverse:
         pos=int(remap_read.qname.strip().split(":")[3])
@@ -69,7 +68,7 @@ while not end_of_file and map_indx< len(correct_maps) and line_num <= correct_ma
                 exit()
             if orig_num==correct:
                 keep_bam.write(orig_read)
-        
+
         line_num+=1
         correct=0
         try:
